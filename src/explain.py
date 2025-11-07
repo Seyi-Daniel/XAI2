@@ -226,34 +226,6 @@ def create_visualization(
     plt.close(fig)
 
 
-def save_individual_images(
-    image: np.ndarray,
-    grad_cam_map: np.ndarray,
-    lrp_map: np.ndarray,
-    gradient_map: np.ndarray,
-    smoothgrad_maps: Dict[float, np.ndarray],
-    output_dir: Path,
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    plt.imsave(output_dir / "original.png", image, cmap="gray")
-
-    fig, ax = plt.subplots()
-    ax.imshow(image, cmap="gray")
-    ax.imshow(grad_cam_map, cmap="jet", alpha=0.5)
-    ax.axis("off")
-    fig.savefig(output_dir / "grad_cam_overlay.png", dpi=200, bbox_inches="tight", pad_inches=0)
-    plt.close(fig)
-
-    plt.imsave(output_dir / "grad_cam.png", grad_cam_map, cmap="jet")
-    plt.imsave(output_dir / "lrp.png", lrp_map, cmap="seismic")
-    plt.imsave(output_dir / "gradient_saliency.png", gradient_map, cmap="inferno")
-
-    for sigma, sg_map in sorted(smoothgrad_maps.items()):
-        filename = f"smoothgrad_sigma_{sigma:.2f}.png"
-        plt.imsave(output_dir / filename, sg_map, cmap="inferno")
-
-
 def generate_report(fig_paths: List[Path], summary_text: str, output_pdf: Path) -> None:
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
     with PdfPages(output_pdf) as pdf:
@@ -314,9 +286,7 @@ def main() -> None:
         }
 
         image_np = to_numpy_image(img_tensor)
-        sample_dir = args.output_dir / f"sample_{index:05d}"
-        overview_path = sample_dir / "overview.png"
-        sample_dir.mkdir(parents=True, exist_ok=True)
+        output_path = args.output_dir / f"sample_{index:05d}.png"
         create_visualization(
             image_np,
             grad_cam_map,
@@ -326,17 +296,9 @@ def main() -> None:
             label,
             pred,
             index,
-            overview_path,
+            output_path,
         )
-        save_individual_images(
-            image_np,
-            grad_cam_map,
-            lrp_map_norm,
-            gradient_map,
-            smoothgrad_maps,
-            sample_dir,
-        )
-        fig_paths.append(overview_path)
+        fig_paths.append(output_path)
 
         observations.append(
             f"Sample {index}: Grad-CAM focuses on stroke endpoints, LRP spreads relevance along the digit body, "
