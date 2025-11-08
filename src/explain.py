@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -22,6 +22,55 @@ def normalize(arr: np.ndarray) -> np.ndarray:
 
 def to_numpy_image(tensor: torch.Tensor) -> np.ndarray:
     return tensor.detach().cpu().squeeze().numpy()
+
+
+def save_image_with_plot(
+    base: np.ndarray,
+    path: Path,
+    *,
+    cmap: str = "gray",
+    overlay: Optional[Tuple[np.ndarray, str, float]] = None,
+) -> None:
+    """Save a single image (optionally with an overlaid heatmap) to disk."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(3, 3))
+    ax.imshow(base, cmap=cmap)
+    if overlay is not None:
+        heatmap, overlay_cmap, alpha = overlay
+        ax.imshow(heatmap, cmap=overlay_cmap, alpha=alpha)
+    ax.axis("off")
+    plt.tight_layout()
+    fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.0)
+    plt.close(fig)
+
+
+def save_individual_assets(
+    image: np.ndarray,
+    grad_cam_map: np.ndarray,
+    lrp_map: np.ndarray,
+    gradient_map: np.ndarray,
+    smoothgrad_maps: Dict[float, np.ndarray],
+    sample_dir: Path,
+) -> None:
+    """Persist reusable individual figures for a single sample."""
+
+    save_image_with_plot(image, sample_dir / "original.png")
+    save_image_with_plot(
+        image,
+        sample_dir / "grad_cam.png",
+        overlay=(grad_cam_map, "jet", 0.5),
+    )
+    save_image_with_plot(lrp_map, sample_dir / "lrp_epsilon.png", cmap="seismic")
+    save_image_with_plot(gradient_map, sample_dir / "gradient_saliency.png", cmap="inferno")
+    for sigma in sorted(smoothgrad_maps):
+        sg_map = smoothgrad_maps[sigma]
+        sigma_str = f"{sigma:.2f}".rstrip("0").rstrip(".")
+        save_image_with_plot(
+            sg_map,
+            sample_dir / f"smoothgrad_sigma{sigma_str}.png",
+            cmap="inferno",
+        )
 
 
 def grad_cam(model: MnistCNN, image: torch.Tensor, target_class: int) -> np.ndarray:
@@ -273,8 +322,6 @@ def main() -> None:
     fig_paths: List[Path] = []
     observations = []
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
     for i, (img_tensor, label, pred, index) in enumerate(samples, start=1):
         img_tensor = img_tensor.to(device)
         grad_cam_map = grad_cam(model, img_tensor.clone(), pred)
@@ -286,7 +333,18 @@ def main() -> None:
         }
 
         image_np = to_numpy_image(img_tensor)
-        output_path = args.output_dir / f"sample_{index:05d}.png"
+        sample_dir = args.output_dir / f"sample_{index:05d}"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        overview_path = sample_dir / "overview.png"
+
+        save_individual_assets(
+            image_np,
+            grad_cam_map,
+            lrp_map_norm,
+            gradient_map,
+            smoothgrad_maps,
+            sample_dir,
+        )
         create_visualization(
             image_np,
             grad_cam_map,
@@ -296,9 +354,9 @@ def main() -> None:
             label,
             pred,
             index,
-            output_path,
+            overview_path,
         )
-        fig_paths.append(output_path)
+        fig_paths.append(overview_path)
 
         observations.append(
             f"Sample {index}: Grad-CAM focuses on stroke endpoints, LRP spreads relevance along the digit body, "
@@ -313,7 +371,7 @@ def main() -> None:
     )
 
     generate_report(fig_paths, summary_text, args.report_path)
-    print(f"Saved figures to {args.output_dir}")
+    print(f"Saved per-sample assets to {args.output_dir}")
     print(f"PDF report available at {args.report_path}")
 
 
